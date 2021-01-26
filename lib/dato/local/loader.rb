@@ -15,6 +15,14 @@ module Dato
 
       PUSHER_API_KEY = '75e6ef0fe5d39f481626'
 
+      RETRY_CLASSES = [
+        Faraday::ClientError,
+        Faraday::ConnectionFailed,
+        Net::OpenTimeout,
+        NoMethodError,
+        SocketError
+      ]
+
       def initialize(client, preview_mode = false)
         @client = client
         @preview_mode = preview_mode
@@ -24,9 +32,9 @@ module Dato
 
       def load
         threads = [
-          Thread.new { Thread.current[:output] = site },
-          Thread.new { Thread.current[:output] = all_items },
-          Thread.new { Thread.current[:output] = all_uploads }
+          Thread.new { Thread.current[:output] = retry_on_error { site } },
+          Thread.new { Thread.current[:output] = retry_on_error { all_items } },
+          Thread.new { Thread.current[:output] = retry_on_error { all_uploads } }
         ]
 
         results = threads.map do |t|
@@ -206,6 +214,18 @@ module Dato
 
       def pusher_auth_method(socket_id, channel)
         client.pusher_token(socket_id, channel.name)["auth"]
+      end
+
+      def retry_on_error(limit: 20)
+        tries ||= 1
+        yield
+      rescue *RETRY_CLASSES => e
+        if tries < limit
+          warn "#### Error: #{e}, tried #{tries} times"
+          tries += 1
+          retry
+        end
+        raise e
       end
     end
   end
